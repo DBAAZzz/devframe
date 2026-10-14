@@ -29,5 +29,13 @@ export const diagnostics = defineDiagnostics({
       why: (p: { file: string }) => `The onboarding state file ${p.file} could not be read or written.`,
       fix: 'Make sure that `stateDir` is writable, or point it at another directory.',
     },
+    DF9005: {
+      why: (p: { command: string }) => `A browser asked to run \`${p.command}\`. Type y and press Enter to allow it.`,
+      fix: 'If you did not click Install, press Enter to refuse. Another device can reach this dev server, so bind it to localhost.',
+    },
+    DF9006: {
+      why: (p: { command: string }) => `A browser asked to run \`${p.command}\`, but no interactive terminal can confirm it. The install was refused.`,
+      fix: 'Run the command yourself, or pass an `onConfirm` function to `createOnboarding()`.',
+    },
   },
 })

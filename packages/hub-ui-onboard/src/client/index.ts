@@ -266,8 +266,17 @@ function mount(initial: OnboardingStatus): void {
   }
 
   async function startInstall(): Promise<void> {
+    // The request stays open until the developer answers in the terminal.
+    install.disabled = true
+    installLabel.textContent = messages.confirming
+    const response = await api('install', { method: 'POST' })
+    if (!response.ok) {
+      await poll()
+      note.hidden = false
+      note.textContent = messages.refused
+      return
+    }
     render({ ...initial, state: 'installing' })
-    await api('install', { method: 'POST' })
     await poll()
   }
 

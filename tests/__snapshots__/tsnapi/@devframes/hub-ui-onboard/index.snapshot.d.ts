@@ -11,6 +11,7 @@ export interface CreateOnboardingOptions {
   branding?: OnboardingBranding;
   messages?: Partial<OnboardingMessages>;
   onInstalled?: () => void | OnboardingHandler | Promise<void | OnboardingHandler>;
+  onConfirm?: (_: OnboardingConfirmation) => boolean | Promise<boolean>;
 }
 export interface Onboarding {
   handler: OnboardingHandler;
@@ -24,10 +25,17 @@ export interface OnboardingBranding {
   logo?: OnboardingLogo;
   primaryColor?: string;
 }
+export interface OnboardingConfirmation {
+  packages: string[];
+  command: string[];
+  request: Request;
+}
 export interface OnboardingMessages {
   title: string;
   description: string;
   install: string;
+  confirming: string;
+  refused: string;
   hide: string;
   disable: string;
   installing: string;

@@ -8,7 +8,7 @@ pnpm --filter hub-onboard-vite dev
 
 Open the printed URL. The button at the bottom left opens a panel with two actions:
 
-- Install runs `pnpm add -D @devframes/hub @devframes/hub-ui @devframes/plugin-git` in this directory. When it finishes, the host starts the real hub on `/__devframes/` in the same process and the button swaps itself for the floating dock.
+- Install asks you to type `y` in the terminal that runs Vite, then runs `pnpm add -D @devframes/hub @devframes/hub-ui @devframes/plugin-git` in this directory. When it finishes, the host starts the real hub on `/__devframes/` in the same process and the button swaps itself for the floating dock.
 - Hide for now hides the button for this browser tab.
 - Disable entirely writes `node_modules/.devframe/hub-ui-onboard.json`. The host reads `onboarding.disabled` on the next start and injects no script.
 

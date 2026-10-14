@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { Diagnostic } from 'nostics'
 import { diagnostics } from './diagnostics'
 import { packagesInstalled, resolveInstallCommand, runInstall } from './install'
+import { confirmInTerminal } from './terminal-confirm'
 
 export type * from './types'
 
@@ -38,6 +39,8 @@ export function defaultMessages(productName: string): OnboardingMessages {
     title: productName,
     description: `${productName} enables development features in your project. Install it with:`,
     install: `Install ${productName}`,
+    confirming: 'Confirm in your terminal...',
+    refused: 'The dev server did not allow the install. Check its terminal, or run the command above yourself.',
     hide: 'Hide in this session',
     disable: 'Disable entirely',
     installing: 'Installing...',
@@ -185,9 +188,34 @@ export function createOnboarding(options: CreateOnboardingOptions): Onboarding {
     return new Response(null, { status: 204 })
   }
 
+  const commandLine = async () => {
+    const resolved = await getCommand()
+    return [resolved.command, ...resolved.args]
+  }
+
+  // The dev server can be reachable from other devices, and a non-browser
+  // request can send any `Origin`. So the developer allows each install.
+  const onConfirm = options.onConfirm ?? (({ command }) => confirmInTerminal(command))
+  let asking: Promise<boolean> | undefined
+
+  async function startInstall(request: Request): Promise<Response> {
+    if (state !== 'idle' && state !== 'error')
+      return new Response(null, { status: 202 })
+    asking ??= commandLine()
+      .then(command => onConfirm({ packages: plan.packages, command, request }))
+      .finally(() => {
+        asking = undefined
+      })
+    if (!await asking)
+      return new Response(null, { status: 403 })
+    // Clicks that shared the answer start one install.
+    if (state === 'idle' || state === 'error')
+      void install()
+    return new Response(null, { status: 202 })
+  }
+
   async function status(): Promise<OnboardingStatus> {
-    const command = await getCommand()
-    return { state, command: [command.command, ...command.args], branding, messages, error }
+    return { state, command: await commandLine(), branding, messages, error }
   }
 
   const handler: OnboardingHandler = async (request) => {
@@ -210,11 +238,7 @@ export function createOnboarding(options: CreateOnboardingOptions): Onboarding {
     if (route === 'POST __onboard/install' || route === 'POST __onboard/disable') {
       if (!isSameOrigin(request))
         return new Response(null, { status: 403 })
-      if (route.endsWith('disable'))
-        return disable()
-      if (state === 'idle' || state === 'error')
-        void install()
-      return new Response(null, { status: 202 })
+      return route.endsWith('disable') ? disable() : startInstall(request)
     }
     return new Response(null, { status: 404 })
   }

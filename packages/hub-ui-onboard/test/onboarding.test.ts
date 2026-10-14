@@ -1,12 +1,12 @@
 import type { AddressInfo } from 'node:net'
-import type { Onboarding, OnboardingStatus } from '../src/types'
+import type { Onboarding, OnboardingConfirmation, OnboardingStatus } from '../src/types'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createOnboarding } from '../src'
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/pkg', import.meta.url))
@@ -56,6 +56,9 @@ async function waitFor<T>(read: () => Promise<T>, done: (value: T) => boolean): 
 }
 
 const settled = (s: OnboardingStatus) => s.state !== 'installing' && s.state !== 'idle'
+const allow = () => true
+
+const install = (origin: string) => fetch(`${origin}/__devframes/__onboard/install`, { method: 'POST', headers: { origin } })
 
 describe('createOnboarding', () => {
   it('refuses an empty package list', () => {
@@ -105,6 +108,63 @@ describe('createOnboarding', () => {
     expect((await status(origin)).state).toBe('idle')
   })
 
+  it('installs only after `onConfirm` allows it', async () => {
+    const asked: OnboardingConfirmation[] = []
+    let allowed = false
+    const origin = await serve(createOnboarding({
+      cwd: tempProject(),
+      packages: ['file:/nonexistent/onboard-missing'],
+      onConfirm: (confirmation) => {
+        asked.push(confirmation)
+        return allowed
+      },
+    }))
+
+    expect((await install(origin)).status).toBe(403)
+    expect((await status(origin)).state).toBe('idle')
+    expect(asked[0]).toMatchObject({
+      packages: ['file:/nonexistent/onboard-missing'],
+      command: ['npm', 'i', '-D', 'file:/nonexistent/onboard-missing'],
+    })
+    expect(asked[0]!.request.headers.get('origin')).toBe(origin)
+
+    allowed = true
+    expect((await install(origin)).status).toBe(202)
+    // The package does not exist, so the install that ran ends in an error.
+    expect((await waitFor(() => status(origin), settled)).state).toBe('error')
+  })
+
+  it('shares one open question between clicks', async () => {
+    let calls = 0
+    let answer: (allowed: boolean) => void = () => {}
+    const onboarding = createOnboarding({
+      cwd: tempProject(),
+      packages: ['x'],
+      onConfirm: () => {
+        calls++
+        return new Promise(resolve => answer = resolve)
+      },
+    })
+    const click = () => onboarding.handler(new Request('http://localhost/__devframes/__onboard/install', { method: 'POST' }))
+
+    const clicks = [click(), click()]
+    await waitFor(async () => calls, n => n > 0)
+    answer(false)
+    expect((await Promise.all(clicks)).map(r => r.status)).toEqual([403, 403])
+    expect(calls).toBe(1)
+  })
+
+  it('refuses an install when no terminal can confirm it', async () => {
+    // Vitest gives its workers a piped stdin, so the default `onConfirm` sees no TTY.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    cleanups.push(() => warn.mockRestore())
+    const origin = await serve(createOnboarding({ cwd: tempProject(), packages: ['x'] }))
+
+    expect((await install(origin)).status).toBe(403)
+    expect(String(warn.mock.lastCall?.[0])).toContain('DF9006')
+    expect((await status(origin)).state).toBe('idle')
+  })
+
   it('persists disable on disk for the next process', async () => {
     const cwd = tempProject()
     const origin = await serve(createOnboarding({ cwd, packages: ['x'] }))
@@ -123,6 +183,7 @@ describe('createOnboarding', () => {
       cwd,
       packages: [`file:${FIXTURE}`],
       onInstalled: () => () => new Response('hub here'),
+      onConfirm: allow,
     })
     const origin = await serve(onboarding)
 
@@ -159,7 +220,7 @@ describe('createOnboarding', () => {
 
   it('reports a failed install as an error the client can retry', async () => {
     const cwd = tempProject()
-    const origin = await serve(createOnboarding({ cwd, packages: ['file:/nonexistent/onboard-missing'] }))
+    const origin = await serve(createOnboarding({ cwd, packages: ['file:/nonexistent/onboard-missing'], onConfirm: allow }))
     await fetch(`${origin}/__devframes/__onboard/install`, { method: 'POST', headers: { origin } })
     const final = await waitFor(() => status(origin), s => s.state === 'error')
     expect(final.error?.code).toBe('DF9001')
@@ -168,7 +229,7 @@ describe('createOnboarding', () => {
 
   it('asks for a restart when onInstalled returns nothing', async () => {
     const cwd = tempProject()
-    const origin = await serve(createOnboarding({ cwd, packages: [`file:${FIXTURE}`], dev: false }))
+    const origin = await serve(createOnboarding({ cwd, packages: [`file:${FIXTURE}`], dev: false, onConfirm: allow }))
     await fetch(`${origin}/__devframes/__onboard/install`, { method: 'POST', headers: { origin } })
     const final = await waitFor(() => status(origin), settled)
     expect(final.state).toBe('installed')
