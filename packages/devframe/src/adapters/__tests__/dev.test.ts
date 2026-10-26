@@ -1,5 +1,6 @@
 import type { DevframeNodeContext, DevframeRpcClientFunctions, DevframeRpcServerFunctions } from '../../types'
 import { mkdtempSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineDevframe } from 'devframe'
@@ -30,6 +31,15 @@ function makeTmpDist(): string {
   const dir = mkdtempSync(join(tmpdir(), 'devframe-dev-'))
   writeFileSync(join(dir, 'index.html'), '<!doctype html><title>test</title>', 'utf-8')
   return dir
+}
+
+// Holds a port on one address, like an unrelated server already running.
+function listenOn(port: number, host: string): Promise<ReturnType<typeof createServer>> {
+  return new Promise((resolve, reject) => {
+    const server = createServer()
+    server.once('error', reject)
+    server.listen(port, host, () => resolve(server))
+  })
 }
 
 async function connectRaw(url: string, origin?: string): Promise<'open' | 'closed'> {
@@ -761,6 +771,29 @@ describe('adapters/dev', () => {
       defaultPort: override,
     })
     expect(port).toBe(override)
+  })
+
+  it('createDevServer on the default host does not share a port held on 127.0.0.1', async () => {
+    const taken = await getPort({ port: 19660, host: '127.0.0.1' })
+    const blocker = await listenOn(taken, '127.0.0.1')
+    const devframe = defineDevframe({
+      id: 'devframe-test-port-shared',
+      name: 'Port Shared',
+      version: '0.0.0',
+      packageName: 'devframe-test',
+      homepage: 'https://example.test',
+      description: 'Test devframe.',
+      setup: () => {},
+      cli: { port: taken },
+    })
+    const handle = await createDevServer(devframe, { openBrowser: false, distDir: makeTmpDist() })
+    try {
+      expect(handle.port).not.toBe(taken)
+    }
+    finally {
+      await handle.close()
+      blocker.close()
+    }
   })
 
   it('registers the instance in the registry and unregisters on close', async () => {
