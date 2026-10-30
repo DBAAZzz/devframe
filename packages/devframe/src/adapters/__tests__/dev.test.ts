@@ -789,9 +789,36 @@ describe('adapters/dev', () => {
     const handle = await createDevServer(devframe, { openBrowser: false, distDir: makeTmpDist() })
     try {
       expect(handle.port).not.toBe(taken)
+      // A page on either loopback address reaches this dev server.
+      for (const host of ['127.0.0.1', '[::1]']) {
+        const res = await fetch(`http://${host}:${handle.port}/__connection.json`)
+        expect(res.status).toBe(200)
+      }
     }
     finally {
       await handle.close()
+      blocker.close()
+    }
+  })
+
+  it('createDevServer fails on a pinned port held on 127.0.0.1', async () => {
+    const taken = await getPort({ port: 19670, host: '127.0.0.1' })
+    const blocker = await listenOn(taken, '127.0.0.1')
+    const devframe = defineDevframe({
+      id: 'devframe-test-port-pinned',
+      name: 'Port Pinned',
+      version: '0.0.0',
+      packageName: 'devframe-test',
+      homepage: 'https://example.test',
+      description: 'Test devframe.',
+      setup: () => {},
+    })
+    try {
+      await expect(createDevServer(devframe, { port: taken, openBrowser: false, distDir: makeTmpDist() }))
+        .rejects
+        .toMatchObject({ code: 'DF0052' })
+    }
+    finally {
       blocker.close()
     }
   })

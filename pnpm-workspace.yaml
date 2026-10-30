@@ -103,7 +103,6 @@ overrides:
 
 patchedDependencies:
   comark-docs@0.0.1: patches/comark-docs@0.0.1.patch
-  get-port-please@3.2.0: patches/get-port-please@3.2.0.patch
 
 allowBuilds:
   '@parcel/watcher': false
